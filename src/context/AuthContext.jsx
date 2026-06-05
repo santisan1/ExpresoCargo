@@ -23,7 +23,8 @@ export function AuthProvider({ children }) {
           return
         }
         try {
-          const profileSnap = await firestore.getDoc(firestore.doc(db, 'users', user.uid))
+          const profileRef = firestore.doc(db, 'users', user.uid)
+          const profileSnap = await firestore.getDoc(profileRef)
           if (!profileSnap.exists()) {
             setProfile(null)
             setAuthError('Usuario sin perfil operativo')
@@ -37,7 +38,7 @@ export function AuthProvider({ children }) {
             setLoading(false)
             return
           }
-          await firestore.updateDoc(firestore.doc(db, 'users', user.uid), { lastLoginAt: firestore.serverTimestamp() }).catch(() => {})
+          await firestore.updateDoc(profileRef, { lastLoginAt: firestore.serverTimestamp() }).catch(() => {})
           setProfile(data)
         } catch (error) {
           setProfile(null)

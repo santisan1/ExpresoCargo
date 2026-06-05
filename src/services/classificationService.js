@@ -18,6 +18,15 @@ const FALLBACK_CITY_ZONE = new Map([
   ['tucuman', 'zona-d-nacional'],
 ])
 
+const FALLBACK_ZONE_CODE = {
+  'zona-u-urgentes-crossdock': 'URGENTE',
+  'zona-a-cordoba-capital': 'ZONA-A',
+  'zona-b-sierras': 'ZONA-B',
+  'zona-c-interior-cordoba': 'ZONA-C',
+  'zona-d-nacional': 'ZONA-D',
+  'zona-incidencias': 'INC',
+}
+
 export function classifyPackage(pkg, rules = []) {
   const activeRules = rules.filter((rule) => rule.active !== false).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
   for (const rule of activeRules) {
@@ -33,10 +42,10 @@ export function classifyPackage(pkg, rules = []) {
 export function getZoneLabel(zoneId, zones = []) {
   if (!zoneId) return 'Sin zona definida'
   const zone = zones.find((item) => item.id === zoneId || item.code === zoneId)
-  return zone ? `${zone.name || zone.code}${zone.dock ? ` · ${zone.dock}` : ''}` : zoneId
+  return zone ? `${zone.name || zone.code}${zone.dock ? ` · ${zone.dock}` : ''}` : (FALLBACK_ZONE_CODE[zoneId] || zoneId)
 }
 
 export function getZoneCode(zoneId, zones = []) {
   const zone = zones.find((item) => item.id === zoneId || item.code === zoneId)
-  return zone?.code || zoneId || ''
+  return zone?.code || FALLBACK_ZONE_CODE[zoneId] || zoneId || ''
 }

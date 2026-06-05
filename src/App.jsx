@@ -11,27 +11,36 @@ import Packages from './pages/Packages'
 import Reports from './pages/Reports'
 import Scan from './pages/Scan'
 import Settings from './pages/Settings'
+import { canAccessRoute } from './utils/format'
 import { RouterProvider, useLocation, useNavigate } from './utils/router'
+
+function AccessDenied({ profile }) {
+  return <div className="card"><h2>Acceso denegado</h2><p>Tu rol ({profile?.role}) no tiene permisos para esta pantalla.</p></div>
+}
 
 function ProtectedApp() {
   const { isAuthenticated, loading, authError, profile } = useAuth()
   const location = useLocation(); const navigate = useNavigate()
   if (loading) return <div className="boot">Inicializando Firebase...</div>
-  if (!isAuthenticated) return <Login />
+  if (!isAuthenticated) {
+    if (location.pathname !== '/login') queueMicrotask(() => navigate('/login'))
+    return <Login />
+  }
   if (location.pathname === '/login') queueMicrotask(() => navigate('/dashboard'))
   const path = location.pathname === '/' || location.pathname === '/app' || location.pathname === '/login' ? '/dashboard' : location.pathname
   if ((location.pathname === '/' || location.pathname === '/app') && path !== location.pathname) queueMicrotask(() => navigate('/dashboard'))
-  const denied = <div className="card"><h2>Acceso restringido</h2><p>Tu rol ({profile?.role}) no tiene permisos para esta pantalla.</p></div>
+
   let page
-  if (path === '/dashboard') page = ['admin','supervisor'].includes(profile.role) ? <Dashboard /> : <Scan />
+  if (!canAccessRoute(profile, path)) page = <AccessDenied profile={profile} />
+  else if (path === '/dashboard') page = <Dashboard />
   else if (path === '/scan') page = <Scan />
   else if (path === '/packages') page = <Packages />
   else if (path === '/packages/new') page = <NewPackage />
   else if (path.startsWith('/packages/')) page = <PackageDetail id={path.split('/')[2]} />
-  else if (path === '/alerts') page = ['admin','supervisor'].includes(profile.role) ? <Alerts /> : denied
-  else if (path === '/reports') page = ['admin','supervisor'].includes(profile.role) ? <Reports /> : denied
-  else if (path === '/settings') page = ['admin','supervisor'].includes(profile.role) ? <Settings /> : denied
-  else page = <Dashboard />
+  else if (path === '/alerts') page = <Alerts />
+  else if (path === '/reports') page = <Reports />
+  else if (path === '/settings') page = <Settings />
+  else page = <AccessDenied profile={profile} />
   return <DataProvider><Layout>{authError && <div className="error-box">{authError}</div>}{page}</Layout></DataProvider>
 }
 
