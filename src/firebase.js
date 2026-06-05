@@ -14,21 +14,21 @@ const firestoreModuleUrl = `https://www.gstatic.com/firebasejs/${SDK_VERSION}/fi
 
 let firebasePromise
 
-// Carga el SDK modular oficial desde gstatic para mantener Vite sin backend ni Admin SDK.
+// Carga únicamente Firebase Client SDK modular: initializeApp, getAuth y getFirestore.
 export function getFirebase() {
   if (!firebasePromise) {
     firebasePromise = Promise.all([
       import(/* @vite-ignore */ appModuleUrl),
       import(/* @vite-ignore */ authModuleUrl),
       import(/* @vite-ignore */ firestoreModuleUrl),
-    ]).then(([appSdk, authSdk, firestoreSdk]) => {
+    ]).then(([appSdk, authSdk, firestore]) => {
       const app = appSdk.initializeApp(firebaseConfig)
       return {
         app,
         auth: authSdk.getAuth(app),
-        db: firestoreSdk.getFirestore(app),
+        db: firestore.getFirestore(app),
         authSdk,
-        firestore: firestoreSdk,
+        firestore,
       }
     })
   }

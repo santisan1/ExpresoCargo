@@ -1,6 +1,6 @@
 import { getFirebase } from '../firebase'
 import { classifyPackage, getZoneCode, getZoneLabel } from './classificationService'
-import { hoursSince } from '../utils/format'
+import { can, hoursSince, STATUS_FLOW } from '../utils/format'
 
 async function sdk() {
   return getFirebase()
@@ -14,11 +14,25 @@ function clean(value) {
   return value
 }
 
+function requirePermission(profile, permission, roles = []) {
+  if (!can(profile, permission, roles)) throw new Error('Acceso denegado para esta operación')
+}
+
+function assertAllowedTransition(pkg, nextStatus, profile) {
+  if (nextStatus === 'incident') return
+  if (can(profile, 'packages.status.override')) return
+  const currentIndex = STATUS_FLOW.indexOf(pkg.currentStatus)
+  const nextIndex = STATUS_FLOW.indexOf(nextStatus)
+  if (currentIndex === -1 || nextIndex === -1 || nextIndex !== currentIndex + 1) {
+    throw new Error(`Transición no permitida: ${pkg.currentStatus} → ${nextStatus}`)
+  }
+}
+
 export async function subscribeCollection(path, callback, orderField = null) {
   const { db, firestore } = await sdk()
   const ref = firestore.collection(db, path)
   const q = orderField ? firestore.query(ref, firestore.orderBy(orderField)) : ref
-  return firestore.onSnapshot(q, (snapshot) => callback(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))))
+  return firestore.onSnapshot(q, (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))))
 }
 
 export async function getDocument(path, id) {
@@ -36,7 +50,7 @@ export async function subscribePackageMovements(packageId, callback) {
   const { db, firestore } = await sdk()
   const ref = firestore.collection(db, 'packages', packageId, 'movements')
   const q = firestore.query(ref, firestore.orderBy('scannedAt', 'desc'))
-  return firestore.onSnapshot(q, (snapshot) => callback(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))))
+  return firestore.onSnapshot(q, (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))))
 }
 
 export async function findPackageByCode(code) {
@@ -45,17 +59,19 @@ export async function findPackageByCode(code) {
   const guideQ = firestore.query(packagesRef, firestore.where('guideNumber', '==', code), firestore.limit(1))
   const barcodeQ = firestore.query(packagesRef, firestore.where('barcodeValue', '==', code), firestore.limit(1))
   const [guideSnap, barcodeSnap] = await Promise.all([firestore.getDocs(guideQ), firestore.getDocs(barcodeQ)])
-  const doc = guideSnap.docs[0] || barcodeSnap.docs[0]
-  return doc ? { id: doc.id, ...doc.data() } : null
+  const found = guideSnap.docs[0] || barcodeSnap.docs[0]
+  return found ? { id: found.id, ...found.data() } : null
 }
 
 export async function createPackage(form, { profile, rules, zones, defaultSlaHours = 8 }) {
+  requirePermission(profile, 'packages.create', ['admin'])
   const { db, firestore } = await sdk()
   const packageRef = firestore.doc(firestore.collection(db, 'packages'))
+  const guideNumber = form.guideNumber.trim()
   const normalized = {
-    guideNumber: form.guideNumber.trim(),
-    barcodeValue: form.guideNumber.trim(),
-    qrPayload: form.guideNumber.trim(),
+    guideNumber,
+    barcodeValue: (form.barcodeValue || guideNumber).trim(),
+    qrPayload: (form.qrPayload || guideNumber).trim(),
     originBranchId: form.originBranchId || form.originBranch || 'centro-cordoba',
     destinationBranchId: form.destinationBranchId || form.destinationBranch || 'destino-manual',
     originCity: form.originCity,
@@ -67,7 +83,7 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
       bundles: Number(form.bundles || 1),
       productType: form.productType || 'General',
     },
-    urgency: form.urgency,
+    urgency: form.urgency || 'normal',
     priorityLabel: form.urgency === 'urgente' ? 'Alta' : 'Normal',
     currentStatus: 'created',
     currentLocation: 'Pre-guía generada',
@@ -101,7 +117,7 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
     scannedBy: profile.displayName || profile.name || profile.email,
     scannedAt: firestore.serverTimestamp(),
     scanPoint: 'Alta de paquete',
-    notes: 'Paquete creado desde CargoFlow MVP',
+    notes: 'Paquete creado desde ExpressoCargo Logistics MVP',
     source: 'app',
   }))
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({
@@ -113,6 +129,17 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
 }
 
 export async function changePackageStatus(pkg, nextStatus, { profile, zones = [], rules = [], scanPoint = 'Escaneo operativo', notes = '', incidentReason = '' }) {
+  const permissions = {
+    received: ['packages.receive', ['operario', 'supervisor']],
+    classified: ['packages.classify', ['operario', 'supervisor']],
+    dispatched: ['packages.dispatch', ['supervisor']],
+    delivered: ['packages.deliver', ['supervisor']],
+    incident: ['packages.incident', ['operario', 'supervisor']],
+  }
+  const [permission, roles] = permissions[nextStatus] || []
+  requirePermission(profile, permission, roles)
+  assertAllowedTransition(pkg, nextStatus, profile)
+
   const { db, firestore } = await sdk()
   const packageRef = firestore.doc(db, 'packages', pkg.id)
   const batch = firestore.writeBatch(db)
@@ -129,7 +156,7 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     updates.assignedZoneCode = getZoneCode(expectedZoneId, zones)
     if (!expectedZoneId || expectedZoneId === 'zona-incidencias') {
       hasIncident = true
-      await queueAlert(batch, db, firestore, pkg, 'wrong_zone', 'medium', `Clasificación requiere revisión: ${pkg.destinationCity || 'destino sin regla'}`)
+      queueAlert(batch, firestore, db, pkg, 'wrong_zone', 'medium', `Clasificación requiere revisión: ${pkg.destinationCity || 'destino sin regla'}`)
     }
   }
 
@@ -137,11 +164,11 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     hasIncident = true
     currentLocation = 'Mesa de incidencias'
     updates.incidentReason = incidentReason || notes || 'Incidencia operativa'
-    await queueAlert(batch, db, firestore, pkg, 'incident', 'high', incidentReason || notes || 'Paquete marcado con incidencia')
+    queueAlert(batch, firestore, db, pkg, 'incident', 'high', incidentReason || notes || 'Paquete marcado con incidencia')
   }
 
   if (nextStatus === 'delivered') {
-    await resolvePackageAlerts(batch, db, firestore, pkg.id, ['delay', 'no_scan'])
+    await resolvePackageAlerts(batch, firestore, db, pkg.id)
     currentLocation = 'Entrega confirmada'
   }
 
@@ -175,41 +202,43 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
   await batch.commit()
 }
 
-async function queueAlert(batch, db, firestore, pkg, type, severity, message) {
+function queueAlert(batch, firestore, db, pkg, type, severity, message) {
   const ref = firestore.doc(firestore.collection(db, 'alerts'))
   batch.set(ref, clean({ packageId: pkg.id, guideNumber: pkg.guideNumber, type, severity, message, status: 'open', createdAt: firestore.serverTimestamp(), updatedAt: firestore.serverTimestamp(), source: 'app' }))
 }
 
-async function resolvePackageAlerts(batch, db, firestore, packageId, types) {
+async function resolvePackageAlerts(batch, firestore, db, packageId, types = null) {
   const q = firestore.query(firestore.collection(db, 'alerts'), firestore.where('packageId', '==', packageId), firestore.where('status', '==', 'open'))
   const snap = await firestore.getDocs(q)
   snap.docs.forEach((docSnap) => {
     const data = docSnap.data()
-    if (types.includes(data.type)) batch.update(docSnap.ref, { status: 'resolved', updatedAt: firestore.serverTimestamp() })
+    if (!types || types.includes(data.type)) batch.update(docSnap.ref, { status: 'resolved', resolvedAt: firestore.serverTimestamp(), updatedAt: firestore.serverTimestamp() })
   })
 }
 
 export async function resolveAlert(alert, profile) {
+  requirePermission(profile, 'alerts.resolve', ['supervisor'])
   const { db, firestore } = await sdk()
   const batch = firestore.writeBatch(db)
-  batch.update(firestore.doc(db, 'alerts', alert.id), { status: 'resolved', updatedAt: firestore.serverTimestamp() })
+  batch.update(firestore.doc(db, 'alerts', alert.id), { status: 'resolved', resolvedAt: firestore.serverTimestamp(), updatedAt: firestore.serverTimestamp() })
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({ action: 'alert.resolve', alertId: alert.id, packageId: alert.packageId, actorUid: profile.uid, actorName: profile.displayName || profile.name, createdAt: firestore.serverTimestamp(), source: 'app' }))
   await batch.commit()
 }
 
 export async function recalculateAlerts(packages, profile) {
+  requirePermission(profile, 'alerts.recalculate', ['supervisor'])
   const { db, firestore } = await sdk()
   const batch = firestore.writeBatch(db)
   packages.forEach((pkg) => {
     if (pkg.currentStatus === 'delivered') return
     const basis = pkg.lastScanAt || pkg.createdAt
-    if (pkg.currentStatus === 'created' && !pkg.lastScanAt) {
-      queueAlert(batch, db, firestore, pkg, 'no_scan', 'medium', `Guía ${pkg.guideNumber} creada sin escaneo operativo`)
+    if (pkg.currentStatus === 'created' && !pkg.lastScanAt && !pkg.noScanAlert) {
+      queueAlert(batch, firestore, db, pkg, 'no_scan', 'medium', `Guía ${pkg.guideNumber} creada sin escaneo operativo`)
       batch.update(firestore.doc(db, 'packages', pkg.id), { noScanAlert: true, updatedAt: firestore.serverTimestamp() })
     }
     const sla = Number(pkg.slaHours || Math.max((pkg.scanDueMinutes || 120) / 60, 1))
-    if (hoursSince(basis) > sla) {
-      queueAlert(batch, db, firestore, pkg, 'delay', 'high', `Guía ${pkg.guideNumber} supera SLA de ${sla} h`)
+    if (hoursSince(basis) > sla && !pkg.delayAlert) {
+      queueAlert(batch, firestore, db, pkg, 'delay', 'high', `Guía ${pkg.guideNumber} supera SLA de ${sla} h`)
       batch.update(firestore.doc(db, 'packages', pkg.id), { delayAlert: true, updatedAt: firestore.serverTimestamp() })
     }
   })

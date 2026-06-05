@@ -59,11 +59,27 @@ export function getProductType(pkg) {
   return pkg?.packageData?.productType || pkg?.productType || 'General'
 }
 
+export const ROUTE_PERMISSIONS = {
+  '/dashboard': ['dashboard.view', ['supervisor']],
+  '/scan': ['scan.view', ['operario', 'supervisor']],
+  '/packages': ['packages.view', ['operario', 'supervisor']],
+  '/packages/new': ['packages.create', []],
+  '/alerts': ['alerts.view', ['supervisor']],
+  '/reports': ['reports.view', ['supervisor']],
+  '/settings': ['settings.view', ['supervisor']],
+}
+
 export function can(profile, permission, roles = []) {
-  if (!profile) return false
+  if (!profile || !permission) return false
   if (profile.role === 'admin') return true
   if (profile.permissions?.includes(permission)) return true
   return roles.includes(profile.role)
+}
+
+export function canAccessRoute(profile, path) {
+  if (path.startsWith('/packages/') && path !== '/packages/new') return can(profile, 'packages.view', ['operario', 'supervisor'])
+  const [permission, roles] = ROUTE_PERMISSIONS[path] || []
+  return can(profile, permission, roles)
 }
 
 export function downloadCsv(filename, rows) {

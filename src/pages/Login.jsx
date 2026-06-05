@@ -13,7 +13,7 @@ export default function Login() {
     try { await login(email, password) } finally { setSubmitting(false) }
   }
   return <section className="login-page">
-    <div className="login-card"><div className="brand login-brand"><span className="brand-mark">C</span><div><strong>CargoFlow MVP</strong><small>Expreso Cargo / Grupo Cargo</small></div></div>
+    <div className="login-card"><div className="brand login-brand"><span className="brand-mark">C</span><div><strong>ExpressoCargo Logistics MVP</strong><small>Operación logística</small></div></div>
       <h1>Acceso operativo</h1><p>Autenticación real con Firebase Auth y perfil operativo desde Firestore.</p>
       <form onSubmit={onSubmit} className="form"><label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></label><label>Contraseña<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required /></label>{authError && <div className="error-box">{authError}</div>}<button className="btn btn-primary" disabled={submitting || loading}>{submitting ? 'Validando...' : 'Ingresar'}</button></form>
       <div className="demo-users"><small>Usuarios demo seed:</small>{demos.map((demo) => <button key={demo} onClick={() => { setEmail(demo); setPassword('Demo1234!') }}>{demo}</button>)}</div>
