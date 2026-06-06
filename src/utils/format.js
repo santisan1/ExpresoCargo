@@ -63,7 +63,7 @@ export const ROUTE_PERMISSIONS = {
   '/dashboard': ['dashboard.view', ['supervisor']],
   '/scan': ['scan.view', ['operario', 'supervisor']],
   '/packages': ['packages.view', ['operario', 'supervisor']],
-  '/packages/new': ['packages.create', []],
+  '/packages/new': ['packages.create', ['supervisor']],
   '/alerts': ['alerts.view', ['supervisor']],
   '/reports': ['reports.view', ['supervisor']],
   '/settings': ['settings.view', ['supervisor']],
@@ -72,6 +72,7 @@ export const ROUTE_PERMISSIONS = {
 export function can(profile, permission, roles = []) {
   if (!profile || !permission) return false
   if (profile.role === 'admin') return true
+  if (permission === 'packages.create' && profile.role === 'supervisor') return true
   if (profile.permissions?.includes(permission)) return true
   return roles.includes(profile.role)
 }

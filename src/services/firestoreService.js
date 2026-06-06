@@ -12,7 +12,7 @@ const MOVEMENT_TITLES = {
 }
 
 const CHECKPOINTS = {
-  created: 'Alta de paquete',
+  created: 'Pre-guía',
   received: 'Recepción',
   classified: 'Clasificación',
   dispatched: 'Despacho',
@@ -113,7 +113,7 @@ export async function ensureUniquePackageCode(guideNumber, barcodeValue, current
 }
 
 export async function createPackage(form, { profile, rules, zones, defaultSlaHours = 8 }) {
-  requirePermission(profile, 'packages.create', ['admin'])
+  requirePermission(profile, 'packages.create', ['admin', 'supervisor'])
   const { db, firestore } = await sdk()
   const guideNumber = String(form.guideNumber || '').trim()
   const barcodeValue = String(form.barcodeValue || guideNumber).trim()
@@ -292,15 +292,15 @@ async function resolvePackageAlerts(batch, firestore, db, packageId, profile, ty
   })
 }
 
-export async function resolveAlert(alert, profile) {
+export async function resolveAlert(alert, profile, resolutionNote = '') {
   requirePermission(profile, 'alerts.resolve', ['supervisor'])
   const { db, firestore } = await sdk()
   const batch = firestore.writeBatch(db)
-  batch.update(firestore.doc(db, 'alerts', alert.id), { status: 'resolved', resolvedAt: firestore.serverTimestamp(), resolvedByUid: profile.uid, resolvedByName: actorName(profile), updatedAt: firestore.serverTimestamp() })
+  batch.update(firestore.doc(db, 'alerts', alert.id), clean({ status: 'resolved', resolvedAt: firestore.serverTimestamp(), resolvedByUid: profile.uid, resolvedByName: actorName(profile), resolutionNote, updatedAt: firestore.serverTimestamp() }))
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({
     action: 'alert.resolved', entityType: 'alert', entityId: alert.id, alertId: alert.id, packageId: alert.packageId,
     performedByUid: profile.uid, performedByName: actorName(profile), actorUid: profile.uid, actorName: actorName(profile),
-    message: `Alerta ${alert.type || alert.id} resuelta`, createdAt: firestore.serverTimestamp(), source: 'app',
+    message: `Alerta ${alert.type || alert.id} resuelta`, createdAt: firestore.serverTimestamp(), source: 'app', notes: resolutionNote,
   }))
   await batch.commit()
 }

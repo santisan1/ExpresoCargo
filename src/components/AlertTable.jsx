@@ -1,10 +1,17 @@
+import { useState } from 'react'
+import ActionModal from './ActionModal'
 import { resolveAlert } from '../services/firestoreService'
 import { can, formatDate } from '../utils/format'
 import { useAuth } from '../context/AuthContext'
 
 export default function AlertTable({ alerts = [], compact = false }) {
-  const { profile } = useAuth()
+  const { profile } = useAuth(); const [selected, setSelected] = useState(null); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('')
   const visibleAlerts = compact ? alerts.filter((alert) => alert.status !== 'resolved') : alerts
+  async function confirmResolve() {
+    if (!selected || busy) return
+    setBusy(true); setError('')
+    try { await resolveAlert(selected, profile, note.trim()); setSelected(null); setNote('') } catch (err) { setError(err.message || 'No se pudo resolver la alerta') } finally { setBusy(false) }
+  }
   return <div className="table-wrap">
     <table className="data-table">
       <thead><tr><th>Estado</th><th>Severidad</th><th>Tipo</th><th>Guía</th><th>Mensaje</th>{!compact && <th>Creada</th>}{!compact && <th>Resuelta</th>}<th></th></tr></thead>
@@ -13,10 +20,11 @@ export default function AlertTable({ alerts = [], compact = false }) {
         {visibleAlerts.map((alert) => <tr key={alert.id}>
           <td><span className={alert.status === 'resolved' ? 'pill' : 'pill pill-hot'}>{alert.status === 'resolved' ? 'Resuelta' : 'Abierta'}</span></td>
           <td><span className={`severity severity-${alert.severity || 'medium'}`}>{alert.severity || 'medium'}</span></td>
-          <td>{alert.type}</td><td>{alert.guideNumber || alert.packageId}</td><td>{alert.message}</td>{!compact && <td>{formatDate(alert.createdAt)}</td>}{!compact && <td>{alert.resolvedAt ? `${formatDate(alert.resolvedAt)} · ${alert.resolvedByName || alert.resolvedByUid || ''}` : '—'}</td>}
-          <td>{alert.status !== 'resolved' && can(profile, 'alerts.resolve', ['supervisor']) ? <button className="btn btn-ghost" onClick={() => resolveAlert(alert, profile)}>Resolver</button> : null}</td>
+          <td>{alert.type}</td><td>{alert.guideNumber || '—'}</td><td>{alert.message}</td>{!compact && <td>{formatDate(alert.createdAt)}</td>}{!compact && <td>{alert.resolvedAt ? `${formatDate(alert.resolvedAt)} · ${alert.resolvedByName || 'Usuario operativo'}` : '—'}</td>}
+          <td>{alert.status !== 'resolved' && can(profile, 'alerts.resolve', ['supervisor']) ? <button className="btn btn-ghost" onClick={() => { setSelected(alert); setNote(''); setError('') }}>Resolver</button> : null}</td>
         </tr>)}
       </tbody>
     </table>
+    <ActionModal open={Boolean(selected)} title="Resolver alerta" description="Confirmá la resolución de la alerta operativa. La nota es opcional." fieldLabel="Nota de resolución (opcional)" value={note} onChange={setNote} loading={busy} error={error} onCancel={() => !busy && setSelected(null)} onConfirm={confirmResolve} />
   </div>
 }
