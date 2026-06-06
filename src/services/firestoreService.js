@@ -77,8 +77,7 @@ export async function subscribeDocument(path, id, callback) {
 export async function subscribePackageMovements(packageId, callback) {
   const { db, firestore } = await sdk()
   const ref = firestore.collection(db, 'packages', packageId, 'movements')
-  const q = firestore.query(ref, firestore.orderBy('scannedAt', 'asc'))
-  return firestore.onSnapshot(q, (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))))
+  return firestore.onSnapshot(ref, (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))))
 }
 
 async function getFirstByField(firestore, ref, field, value) {
@@ -139,7 +138,7 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
     priorityLabel: form.urgency === 'urgente' ? 'Alta' : 'Normal',
     currentStatus: 'created',
     currentLocation: 'Alta de paquete',
-    lastScanAt: firestore.serverTimestamp(),
+    lastScanAt: null,
     scanDueMinutes: Number(form.scanDueMinutes || 120),
     hasIncident: false,
     incidentReason: null,
@@ -172,7 +171,8 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
     scannedByUid: profile.uid,
     scannedByName: actorName(profile),
     scannedBy: actorName(profile),
-    scannedAt: firestore.serverTimestamp(),
+    scannedAt: firestore.Timestamp.now(),
+    createdAt: firestore.Timestamp.now(),
     source: 'app',
   }))
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({
@@ -184,7 +184,7 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
   return packageRef.id
 }
 
-export async function changePackageStatus(pkg, nextStatus, { profile, zones = [], rules = [], notes = '', incidentReason = '' }) {
+export async function changePackageStatus(pkg, nextStatus, { profile, zones = [], rules = [], notes = '', incidentReason = '', incidentType = '' }) {
   const permissions = {
     received: ['packages.receive', ['operario', 'supervisor']],
     classified: ['packages.classify', ['operario', 'supervisor']],
@@ -207,6 +207,7 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
   let currentLocation = CHECKPOINTS[nextStatus]
   let hasIncident = Boolean(fresh.hasIncident)
   let updates = {}
+  const scanTime = firestore.Timestamp.now()
 
   if (nextStatus === 'classified') {
     const expectedZoneId = classifyPackage(fresh, rules)
@@ -224,7 +225,9 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     hasIncident = true
     currentLocation = 'Mesa de incidencias'
     updates.incidentReason = incidentReason || notes || 'Incidencia operativa'
-    await queueAlertIfMissing(batch, firestore, db, fresh, 'incident', 'high', incidentReason || notes || 'Paquete marcado con incidencia')
+    updates.incidentType = incidentType || 'Otro'
+    updates.previousOperationalStatus = STATUS_FLOW.includes(fresh.currentStatus) ? fresh.currentStatus : (fresh.previousOperationalStatus || null)
+    await queueAlertIfMissing(batch, firestore, db, fresh, 'incident', 'high', incidentReason || notes || 'Paquete marcado con incidencia', { incidentType: incidentType || 'Otro' })
   }
 
   if (nextStatus === 'delivered') {
@@ -243,7 +246,7 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     assignedZoneId,
     assignedZoneCode: getZoneCode(assignedZoneId, zones) || fresh.assignedZoneCode,
     hasIncident,
-    lastScanAt: firestore.serverTimestamp(),
+    lastScanAt: scanTime,
     updatedAt: firestore.serverTimestamp(),
   })
 
@@ -262,7 +265,8 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     scannedByUid: profile.uid,
     scannedByName: actorName(profile),
     scannedBy: actorName(profile),
-    scannedAt: firestore.serverTimestamp(),
+    scannedAt: scanTime,
+    createdAt: scanTime,
     source: 'app',
   }))
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({
@@ -275,12 +279,12 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
   await batch.commit()
 }
 
-async function queueAlertIfMissing(batch, firestore, db, pkg, type, severity, message) {
+async function queueAlertIfMissing(batch, firestore, db, pkg, type, severity, message, extra = {}) {
   const q = firestore.query(firestore.collection(db, 'alerts'), firestore.where('packageId', '==', pkg.id), firestore.where('type', '==', type), firestore.where('status', '==', 'open'), firestore.limit(1))
   const snap = await firestore.getDocs(q)
   if (!snap.empty) return
   const ref = firestore.doc(firestore.collection(db, 'alerts'))
-  batch.set(ref, clean({ packageId: pkg.id, guideNumber: pkg.guideNumber, type, severity, message, status: 'open', createdAt: firestore.serverTimestamp(), updatedAt: firestore.serverTimestamp(), source: 'app' }))
+  batch.set(ref, clean({ packageId: pkg.id, guideNumber: pkg.guideNumber, type, severity, message, status: 'open', createdAt: firestore.serverTimestamp(), updatedAt: firestore.serverTimestamp(), source: 'app', ...extra }))
 }
 
 async function resolvePackageAlerts(batch, firestore, db, packageId, profile, types = null) {
@@ -292,11 +296,47 @@ async function resolvePackageAlerts(batch, firestore, db, packageId, profile, ty
   })
 }
 
+async function inferPreviousOperationalStatus(firestore, db, pkg) {
+  if (pkg?.previousOperationalStatus && STATUS_FLOW.includes(pkg.previousOperationalStatus)) return pkg.previousOperationalStatus
+  const ref = firestore.collection(db, 'packages', pkg.id, 'movements')
+  const snap = await firestore.getDocs(ref)
+  const sorted = snap.docs.map((docSnap) => docSnap.data())
+    .filter((movement) => STATUS_FLOW.includes(movement.status))
+    .sort((a, b) => ((toMillis(b.scannedAt) || toMillis(b.createdAt) || 0) - (toMillis(a.scannedAt) || toMillis(a.createdAt) || 0)))
+  return sorted[0]?.status || (pkg?.assignedZoneId ? 'classified' : 'received')
+}
+
+function toMillis(value) {
+  if (!value) return 0
+  if (value.toDate) return value.toDate().getTime()
+  if (value.seconds) return value.seconds * 1000
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime()
+}
+
 export async function resolveAlert(alert, profile, resolutionNote = '') {
   requirePermission(profile, 'alerts.resolve', ['supervisor'])
   const { db, firestore } = await sdk()
   const batch = firestore.writeBatch(db)
   batch.update(firestore.doc(db, 'alerts', alert.id), clean({ status: 'resolved', resolvedAt: firestore.serverTimestamp(), resolvedByUid: profile.uid, resolvedByName: actorName(profile), resolutionNote, updatedAt: firestore.serverTimestamp() }))
+
+  if (alert.packageId) {
+    const openQ = firestore.query(firestore.collection(db, 'alerts'), firestore.where('packageId', '==', alert.packageId), firestore.where('status', '==', 'open'))
+    const [openSnap, pkg] = await Promise.all([firestore.getDocs(openQ), getDocument('packages', alert.packageId)])
+    const remainingOpen = openSnap.docs.filter((docSnap) => docSnap.id !== alert.id)
+    if (pkg && remainingOpen.length === 0) {
+      const nextStatus = pkg.currentStatus === 'incident' ? await inferPreviousOperationalStatus(firestore, db, pkg) : pkg.currentStatus
+      batch.update(firestore.doc(db, 'packages', alert.packageId), clean({
+        currentStatus: nextStatus || 'received',
+        currentLocation: nextStatus === 'classified' ? (pkg.assignedZoneCode || 'Clasificación') : CHECKPOINTS[nextStatus] || pkg.currentLocation || 'Recepción',
+        hasIncident: false,
+        delayAlert: false,
+        noScanAlert: false,
+        updatedAt: firestore.serverTimestamp(),
+      }))
+    }
+  }
+
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({
     action: 'alert.resolved', entityType: 'alert', entityId: alert.id, alertId: alert.id, packageId: alert.packageId,
     performedByUid: profile.uid, performedByName: actorName(profile), actorUid: profile.uid, actorName: actorName(profile),
@@ -310,17 +350,27 @@ export async function recalculateAlerts(packages, profile) {
   const { db, firestore } = await sdk()
   const batch = firestore.writeBatch(db)
   for (const pkg of packages) {
-    if (pkg.currentStatus === 'delivered') continue
+    const packageRef = firestore.doc(db, 'packages', pkg.id)
+    if (pkg.currentStatus === 'delivered') {
+      await resolvePackageAlerts(batch, firestore, db, pkg.id, profile, ['delay', 'no_scan'])
+      batch.update(packageRef, { delayAlert: false, noScanAlert: false, updatedAt: firestore.serverTimestamp() })
+      continue
+    }
     const basis = pkg.lastScanAt || pkg.createdAt
-    if (pkg.currentStatus === 'created' && !pkg.lastScanAt && !pkg.noScanAlert) {
+    const shouldNoScan = pkg.currentStatus === 'created' && !pkg.lastScanAt
+    if (shouldNoScan) {
       await queueAlertIfMissing(batch, firestore, db, pkg, 'no_scan', 'medium', `Guía ${pkg.guideNumber} creada sin escaneo operativo`)
-      batch.update(firestore.doc(db, 'packages', pkg.id), { noScanAlert: true, updatedAt: firestore.serverTimestamp() })
+    } else if (pkg.noScanAlert) {
+      await resolvePackageAlerts(batch, firestore, db, pkg.id, profile, ['no_scan'])
     }
     const sla = Number(pkg.slaHours || Math.max((pkg.scanDueMinutes || 120) / 60, 1))
-    if (hoursSince(basis) > sla && !pkg.delayAlert) {
+    const shouldDelay = pkg.currentStatus !== 'incident' && hoursSince(basis) > sla
+    if (shouldDelay) {
       await queueAlertIfMissing(batch, firestore, db, pkg, 'delay', 'high', `Guía ${pkg.guideNumber} supera SLA de ${sla} h`)
-      batch.update(firestore.doc(db, 'packages', pkg.id), { delayAlert: true, updatedAt: firestore.serverTimestamp() })
+    } else if (pkg.delayAlert) {
+      await resolvePackageAlerts(batch, firestore, db, pkg.id, profile, ['delay'])
     }
+    batch.update(packageRef, { noScanAlert: shouldNoScan, delayAlert: shouldDelay, updatedAt: firestore.serverTimestamp() })
   }
   batch.set(firestore.doc(firestore.collection(db, 'auditLog')), clean({ action: 'alerts.recalculate', entityType: 'alert', performedByUid: profile.uid, performedByName: actorName(profile), actorUid: profile.uid, actorName: actorName(profile), message: 'Recalculo de alertas operativas', createdAt: firestore.serverTimestamp(), source: 'app' }))
   await batch.commit()

@@ -1,9 +1,10 @@
-export default function ActionModal({ open, title, description, fieldLabel, value, onChange, required = false, loading = false, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', onCancel, onConfirm, error }) {
+export default function ActionModal({ open, title, description, fieldLabel, value, onChange, required = false, loading = false, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', onCancel, onConfirm, error, children }) {
   if (!open) return null
   return <div className="modal action-modal" role="dialog" aria-modal="true" aria-labelledby="action-modal-title">
     <div className="modal-card action-modal-card">
       <h3 id="action-modal-title">{title}</h3>
       {description && <p className="muted">{description}</p>}
+      {children}
       {fieldLabel && <label>{fieldLabel}{required ? ' *' : ''}<textarea rows="5" value={value} onChange={(event) => onChange?.(event.target.value)} placeholder={required ? 'Ingresá el detalle operativo requerido' : 'Notas opcionales para auditoría y trazabilidad'} autoFocus /></label>}
       {error && <div className="error-box">{error}</div>}
       <div className="actions modal-actions">

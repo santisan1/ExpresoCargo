@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
-import PackageLabel from '../components/PackageLabel'
 import { useData } from '../context/DataContext'
 import { useAuth } from '../context/AuthContext'
 import { classifyPackage, getZoneLabel } from '../services/classificationService'
 import { createPackage, getDocument } from '../services/firestoreService'
+import { generatePackageLabelPdf } from '../services/labelPdfService'
 import { useNavigate } from '../utils/router'
 
-const DEMO_LOCALITIES = ['Córdoba Capital', 'Villa Carlos Paz', 'Cosquín', 'La Falda', 'Río Cuarto', 'Villa María', 'San Francisco', 'Buenos Aires', 'Rosario', 'Mendoza', 'Santa Fe', 'Tucumán']
+const DEMO_LOCALITIES = ['Córdoba Capital', 'Villa Carlos Paz', 'Cosquín', 'La Falda', 'Río Cuarto', 'Villa María', 'San Francisco', 'Buenos Aires', 'Rosario', 'Mendoza', 'Santa Fe', 'Tucumán', 'Localidad Desconocida']
 
 function branchCity(branch) {
   return branch?.city || branch?.locality || branch?.name || branch?.label || ''
@@ -21,14 +21,13 @@ export default function NewPackage() {
   const localityOptions = useMemo(() => {
     const fromBranches = (branches || []).map((branch) => branchCity(branch)).filter(Boolean)
     const fromZones = (zones || []).flatMap((zone) => zone.destinations || zone.localities || [])
-    return [...new Set([...fromBranches, ...fromZones, ...DEMO_LOCALITIES])].sort((a, b) => a.localeCompare(b, 'es'))
+    return [...new Set([...DEMO_LOCALITIES, ...fromBranches, ...fromZones])].sort((a, b) => a.localeCompare(b, 'es'))
   }, [branches, zones])
   const zoneId = useMemo(() => classifyPackage({ ...form, packageData: { productType: form.productType } }, rules), [form, rules])
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
   function selectCity(field, branchField, value) {
-    const branch = (branches || []).find((item) => item.id === value)
-    if (branch) setForm((prev) => ({ ...prev, [branchField]: branch.id, [field]: branchCity(branch) }))
-    else setForm((prev) => ({ ...prev, [branchField]: '', [field]: value }))
+    const branch = (branches || []).find((item) => branchCity(item) === value)
+    setForm((prev) => ({ ...prev, [field]: value, [branchField]: branch?.id || '' }))
   }
   function validate() {
     const required = ['guideNumber', 'recipientName', 'originCity', 'destinationCity', 'weightKg', 'volumeM3', 'bundles', 'productType', 'urgency']
@@ -55,17 +54,17 @@ export default function NewPackage() {
       <label>Guía / código QR<input value={form.guideNumber} onChange={(e) => set('guideNumber', e.target.value)} required /></label>
       <label>Código de barras (opcional)<input value={form.barcodeValue} onChange={(e) => set('barcodeValue', e.target.value)} placeholder="Si queda vacío usa la guía" /></label>
       <label>Destinatario<input value={form.recipientName} onChange={(e) => set('recipientName', e.target.value)} required /></label>
-      <label>Origen / localidad<input list="origin-options" value={form.originCity} onChange={(e) => selectCity('originCity', 'originBranchId', e.target.value)} required /><datalist id="origin-options">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branchCity(branch)}</option>)}{localityOptions.map((city) => <option key={city} value={city} />)}</datalist></label>
-      <label>Destino / localidad<input list="destination-options" value={form.destinationCity} onChange={(e) => selectCity('destinationCity', 'destinationBranchId', e.target.value)} required /><datalist id="destination-options">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branchCity(branch)}</option>)}{localityOptions.map((city) => <option key={city} value={city} />)}</datalist></label>
+      <label>Origen / localidad<select value={form.originCity} onChange={(e) => selectCity('originCity', 'originBranchId', e.target.value)} required>{localityOptions.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
+      <label>Destino / localidad<select value={form.destinationCity} onChange={(e) => selectCity('destinationCity', 'destinationBranchId', e.target.value)} required>{localityOptions.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
       <label>Peso kg<input type="number" min="0.01" step="0.01" value={form.weightKg} onChange={(e) => set('weightKg', e.target.value)} required /></label>
       <label>Volumen m³<input type="number" min="0.001" step="0.001" value={form.volumeM3} onChange={(e) => set('volumeM3', e.target.value)} required /></label>
       <label>Bultos<input type="number" min="1" value={form.bundles} onChange={(e) => set('bundles', e.target.value)} required /></label>
       <label>Urgencia<select value={form.urgency} onChange={(e) => set('urgency', e.target.value)} required><option value="normal">Normal</option><option value="urgente">Urgente</option></select></label>
       <label>Tipo de producto<input value={form.productType} onChange={(e) => set('productType', e.target.value)} required /></label>
-      <div className="zone-preview"><small>Zona calculada</small><strong>{form.urgency === 'urgente' ? 'Cross-Docking/Urgente' : getZoneLabel(zoneId, zones)}</strong>{zoneId === 'zona-incidencias' && <span className="error-text">Destino no reconocido: se asignará Zona Incidencias para revisión.</span>}<span>Código visible/QR: {form.barcodeValue || form.guideNumber}</span></div>
+      <div className="zone-preview"><small>Zona calculada</small><strong>{form.urgency === 'urgente' ? 'Zona U - Urgentes / Cross-Docking' : getZoneLabel(zoneId, zones)}</strong>{zoneId === 'zona-incidencias' && <span className="error-text">Destino no reconocido: se asignará Zona Incidencias para revisión.</span>}<span>Código visible/QR: {form.barcodeValue || form.guideNumber}</span></div>
       {error && <div className="error-box form-wide">{error}</div>}
       <button className="btn btn-primary" disabled={saving}>{saving ? 'Creando...' : 'Crear paquete'}</button>
     </form>
-    {createdPkg && <article className="card label-confirmation"><h3>Paquete creado correctamente</h3><p>Se creó el documento, el primer movimiento y el auditLog. Podés imprimir la etiqueta o abrir el detalle.</p><PackageLabel pkg={createdPkg} zones={zones} /><div className="actions"><button className="btn btn-primary" onClick={() => window.print()}>Imprimir etiqueta</button><button className="btn" onClick={() => navigate(`/packages/${createdPkg.id}`)}>Ir al detalle</button></div></article>}
+    {createdPkg && <article className="card label-confirmation"><h3>Paquete creado correctamente</h3><p>Se creó el documento, el primer movimiento y el auditLog. Podés descargar la etiqueta PDF o abrir el detalle.</p><div className="actions"><button className="btn btn-primary" onClick={() => generatePackageLabelPdf(createdPkg, zones)}>Descargar etiqueta PDF</button><button className="btn" onClick={() => navigate(`/packages/${createdPkg.id}`)}>Ir al detalle</button></div></article>}
   </div>
 }
