@@ -1,21 +1,57 @@
-const FALLBACK_CITY_ZONE = new Map([
-  ['córdoba capital', 'zona-a-cordoba-capital'],
-  ['cordoba capital', 'zona-a-cordoba-capital'],
-  ['villa carlos paz', 'zona-b-sierras'],
-  ['cosquín', 'zona-b-sierras'],
-  ['cosquin', 'zona-b-sierras'],
-  ['la falda', 'zona-b-sierras'],
-  ['río cuarto', 'zona-c-interior-cordoba'],
-  ['rio cuarto', 'zona-c-interior-cordoba'],
-  ['villa maría', 'zona-c-interior-cordoba'],
-  ['villa maria', 'zona-c-interior-cordoba'],
-  ['san francisco', 'zona-c-interior-cordoba'],
-  ['buenos aires', 'zona-d-nacional'],
-  ['rosario', 'zona-d-nacional'],
-  ['mendoza', 'zona-d-nacional'],
-  ['santa fe', 'zona-d-nacional'],
-  ['tucumán', 'zona-d-nacional'],
-  ['tucuman', 'zona-d-nacional'],
+export const CANONICAL_LOCALITIES = [
+  'Córdoba Capital',
+  'Villa Carlos Paz',
+  'Cosquín',
+  'La Falda',
+  'Río Cuarto',
+  'Villa María',
+  'San Francisco',
+  'Buenos Aires',
+  'Rosario',
+  'Mendoza',
+  'Santa Fe',
+  'Tucumán',
+  'Localidad Desconocida',
+]
+
+const LOCALITY_ALIASES = new Map([
+  ['cordoba', 'Córdoba Capital'],
+  ['cordoba capital', 'Córdoba Capital'],
+  ['córdoba', 'Córdoba Capital'],
+  ['córdoba capital', 'Córdoba Capital'],
+  ['carlos paz', 'Villa Carlos Paz'],
+  ['villa carlos paz', 'Villa Carlos Paz'],
+  ['cosquin', 'Cosquín'],
+  ['cosquín', 'Cosquín'],
+  ['la falda', 'La Falda'],
+  ['rio cuarto', 'Río Cuarto'],
+  ['río cuarto', 'Río Cuarto'],
+  ['villa maria', 'Villa María'],
+  ['villa maría', 'Villa María'],
+  ['san francisco', 'San Francisco'],
+  ['buenos aires', 'Buenos Aires'],
+  ['rosario', 'Rosario'],
+  ['mendoza', 'Mendoza'],
+  ['santa fe', 'Santa Fe'],
+  ['tucuman', 'Tucumán'],
+  ['tucumán', 'Tucumán'],
+  ['localidad desconocida', 'Localidad Desconocida'],
+])
+
+const CITY_ZONE = new Map([
+  ['Córdoba Capital', 'zona-a-cordoba-capital'],
+  ['Villa Carlos Paz', 'zona-b-sierras'],
+  ['Cosquín', 'zona-b-sierras'],
+  ['La Falda', 'zona-b-sierras'],
+  ['Río Cuarto', 'zona-c-interior-cordoba'],
+  ['Villa María', 'zona-c-interior-cordoba'],
+  ['San Francisco', 'zona-c-interior-cordoba'],
+  ['Buenos Aires', 'zona-d-nacional'],
+  ['Rosario', 'zona-d-nacional'],
+  ['Mendoza', 'zona-d-nacional'],
+  ['Santa Fe', 'zona-d-nacional'],
+  ['Tucumán', 'zona-d-nacional'],
+  ['Localidad Desconocida', 'zona-incidencias'],
 ])
 
 const FALLBACK_ZONE_CODE = {
@@ -27,8 +63,25 @@ const FALLBACK_ZONE_CODE = {
   'zona-incidencias': 'INC',
 }
 
+export function normalizeLocalityKey(value) {
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ')
+}
+
+export function canonicalizeLocality(value) {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ')
+  if (!raw) return ''
+  return LOCALITY_ALIASES.get(raw.toLowerCase()) || LOCALITY_ALIASES.get(normalizeLocalityKey(raw)) || ''
+}
+
+export function isProcessableLocality(value) {
+  return Boolean(canonicalizeLocality(value))
+}
+
 export function classifyPackage(pkg, rules = []) {
   if (pkg.urgency === 'urgente') return 'zona-u-urgentes-crossdock'
+  const canonicalDestination = canonicalizeLocality(pkg.destinationCity)
+  if (canonicalDestination) return CITY_ZONE.get(canonicalDestination) || 'zona-incidencias'
+
   const activeRules = rules.filter((rule) => rule.active !== false).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
   for (const rule of activeRules) {
     const { field, op, value } = rule.condition || {}
@@ -36,7 +89,7 @@ export function classifyPackage(pkg, rules = []) {
     if (op === '==' && fieldValue === value) return rule.assignZoneId
     if (op === 'in' && Array.isArray(value) && value.includes(fieldValue)) return rule.assignZoneId
   }
-  return FALLBACK_CITY_ZONE.get(String(pkg.destinationCity || '').toLowerCase().trim()) || 'zona-incidencias'
+  return 'zona-incidencias'
 }
 
 export function getZoneLabel(zoneId, zones = []) {
