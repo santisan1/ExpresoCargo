@@ -14,10 +14,10 @@ export default function PackageTable({ packages = [], alerts = [], zones = [], o
             <td><strong>{pkg.guideNumber}</strong><small className="muted block">{pkg.barcodeValue}</small></td>
             <td>{getDestination(pkg)}</td>
             <td><span className={pkg.urgency === 'urgente' ? 'pill pill-hot' : 'pill'}>{pkg.urgency}</span></td>
-            <td>{getZoneLabel(pkg.assignedZoneId, zones)}</td>
+            <td>{getZoneLabel(pkg.assignedZoneId || pkg.assignedZoneCode, zones)}</td>
             <td><StatusBadge status={pkg.currentStatus} /></td>
-            <td>{formatDate(pkg.lastScanAt || pkg.updatedAt)}</td>
-            <td>{count ? <span className="alert-count">{count}</span> : '—'}</td>
+            <td>{pkg.lastScanAt ? formatDate(pkg.lastScanAt) : 'Sin escaneo'}</td>
+            <td>{count ? <span className="alert-count">{count}</span> : 'Sin alertas'}</td>
           </tr>
         })}
       </tbody>

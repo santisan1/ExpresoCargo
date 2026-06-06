@@ -28,6 +28,7 @@ const FALLBACK_ZONE_CODE = {
 }
 
 export function classifyPackage(pkg, rules = []) {
+  if (pkg.urgency === 'urgente') return 'zona-u-urgentes-crossdock'
   const activeRules = rules.filter((rule) => rule.active !== false).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
   for (const rule of activeRules) {
     const { field, op, value } = rule.condition || {}
@@ -35,7 +36,6 @@ export function classifyPackage(pkg, rules = []) {
     if (op === '==' && fieldValue === value) return rule.assignZoneId
     if (op === 'in' && Array.isArray(value) && value.includes(fieldValue)) return rule.assignZoneId
   }
-  if (pkg.urgency === 'urgente') return 'zona-u-urgentes-crossdock'
   return FALLBACK_CITY_ZONE.get(String(pkg.destinationCity || '').toLowerCase().trim()) || 'zona-incidencias'
 }
 

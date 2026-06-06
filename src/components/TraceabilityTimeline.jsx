@@ -1,11 +1,14 @@
 import StatusBadge from './StatusBadge'
-import { formatDate } from '../utils/format'
+import { formatDate, STATUS_META, toDate } from '../utils/format'
+
+const TITLES = { created: 'Alta de paquete', received: 'Recepción', classified: 'Clasificación', dispatched: 'Despacho', delivered: 'Entrega', incident: 'Incidencia' }
 
 export default function TraceabilityTimeline({ movements = [] }) {
+  const sorted = [...movements].sort((a, b) => (toDate(a.scannedAt)?.getTime() || 0) - (toDate(b.scannedAt)?.getTime() || 0))
   return <div className="timeline">
-    {movements.length === 0 && <p className="empty">Sin movimientos registrados.</p>}
-    {movements.map((movement) => <article className="timeline-item" key={movement.id}>
-      <div className="dot" /><div><StatusBadge status={movement.status} /><h4>{movement.scanPoint || 'Punto operativo'}</h4><p>{movement.notes || 'Movimiento operativo'}</p><small>{formatDate(movement.scannedAt)} · {movement.scannedBy || movement.scannedByUid} · {movement.zoneCode || movement.zoneId || 'Sin zona'}</small></div>
+    {sorted.length === 0 && <p className="empty">Sin movimientos registrados.</p>}
+    {sorted.map((movement) => <article className="timeline-item" key={movement.id}>
+      <div className="dot" /><div><h4>{movement.title || TITLES[movement.status] || movement.scanPoint || 'Movimiento operativo'}</h4><div className="timeline-meta"><span>Estado: <StatusBadge status={movement.status} /></span><span>Fecha/hora: <strong>{formatDate(movement.scannedAt)}</strong></span><span>Usuario: <strong>{movement.scannedByName || movement.scannedBy || movement.scannedByUid || '—'}</strong></span><span>Punto de control: <strong>{movement.checkpoint || movement.scanPoint || '—'}</strong></span><span>Zona: <strong>{movement.zoneCode || movement.zoneId || 'Sin zona'}</strong></span></div><p>Nota: {movement.notes || 'Movimiento operativo sin nota.'}</p><small>{STATUS_META[movement.status]?.label || movement.status}</small></div>
     </article>)}
   </div>
 }
