@@ -84,8 +84,8 @@ export function canAccessRoute(profile, path) {
 }
 
 export function downloadCsv(filename, rows) {
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('\r', ' ').replaceAll('\n', ' ').replaceAll('"', '""')}"`).join(';')).join('\r\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

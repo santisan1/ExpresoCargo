@@ -1,12 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext'
 import { useAuth } from '../context/AuthContext'
-import { classifyPackage, getZoneLabel } from '../services/classificationService'
+import { CANONICAL_LOCALITIES, canonicalizeLocality, classifyPackage, getZoneLabel, isProcessableLocality } from '../services/classificationService'
 import { createPackage, getDocument } from '../services/firestoreService'
 import { generatePackageLabelPdf } from '../services/labelPdfService'
 import { useNavigate } from '../utils/router'
-
-const DEMO_LOCALITIES = ['Córdoba Capital', 'Villa Carlos Paz', 'Cosquín', 'La Falda', 'Río Cuarto', 'Villa María', 'San Francisco', 'Buenos Aires', 'Rosario', 'Mendoza', 'Santa Fe', 'Tucumán', 'Localidad Desconocida']
 
 function branchCity(branch) {
   return branch?.city || branch?.locality || branch?.name || branch?.label || ''
@@ -18,21 +16,26 @@ export default function NewPackage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [createdPkg, setCreatedPkg] = useState(null)
-  const localityOptions = useMemo(() => {
-    const fromBranches = (branches || []).map((branch) => branchCity(branch)).filter(Boolean)
-    const fromZones = (zones || []).flatMap((zone) => zone.destinations || zone.localities || [])
-    return [...new Set([...DEMO_LOCALITIES, ...fromBranches, ...fromZones])].sort((a, b) => a.localeCompare(b, 'es'))
-  }, [branches, zones])
+  const branchByCity = useMemo(() => {
+    const entries = (branches || [])
+      .map((branch) => [canonicalizeLocality(branchCity(branch)), branch])
+      .filter(([city]) => city)
+    return new Map(entries)
+  }, [branches])
+  const localityOptions = CANONICAL_LOCALITIES
   const zoneId = useMemo(() => classifyPackage({ ...form, packageData: { productType: form.productType } }, rules), [form, rules])
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
   function selectCity(field, branchField, value) {
-    const branch = (branches || []).find((item) => branchCity(item) === value)
-    setForm((prev) => ({ ...prev, [field]: value, [branchField]: branch?.id || '' }))
+    const canonical = canonicalizeLocality(value) || value
+    const branch = branchByCity.get(canonical)
+    setForm((prev) => ({ ...prev, [field]: canonical, [branchField]: branch?.id || '' }))
   }
   function validate() {
     const required = ['guideNumber', 'recipientName', 'originCity', 'destinationCity', 'weightKg', 'volumeM3', 'bundles', 'productType', 'urgency']
     if (required.some((key) => !String(form[key] ?? '').trim())) return 'Completá todos los campos obligatorios.'
     if (Number(form.weightKg) <= 0 || Number(form.volumeM3) <= 0 || Number(form.bundles) <= 0) return 'Peso, volumen y bultos deben ser mayores a cero.'
+    if (!isProcessableLocality(form.originCity)) return 'El origen debe ser una localidad canónica procesable.'
+    if (!isProcessableLocality(form.destinationCity)) return 'El destino debe ser una localidad canónica procesable o Localidad Desconocida.'
     return ''
   }
   async function submit(event) {

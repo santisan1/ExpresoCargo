@@ -1,5 +1,5 @@
 import { getFirebase } from '../firebase'
-import { classifyPackage, getZoneCode, getZoneLabel } from './classificationService'
+import { canonicalizeLocality, classifyPackage, getZoneCode, getZoneLabel, isProcessableLocality } from './classificationService'
 import { can, hoursSince, STATUS_FLOW } from '../utils/format'
 
 const MOVEMENT_TITLES = {
@@ -118,6 +118,7 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
   const barcodeValue = String(form.barcodeValue || guideNumber).trim()
   if (!guideNumber || !barcodeValue) throw new Error('La guía/código es obligatoria')
   if (!(await ensureUniquePackageCode(guideNumber, barcodeValue))) throw new Error('Ya existe un paquete con esta guía/código')
+  if (!isProcessableLocality(form.destinationCity)) throw new Error('Destino no procesable. Seleccioná una localidad canónica o Localidad Desconocida.')
   const packageRef = firestore.doc(firestore.collection(db, 'packages'))
   const normalized = {
     guideNumber,
@@ -125,8 +126,8 @@ export async function createPackage(form, { profile, rules, zones, defaultSlaHou
     qrPayload: String(form.qrPayload || barcodeValue || guideNumber).trim(),
     originBranchId: form.originBranchId || null,
     destinationBranchId: form.destinationBranchId || null,
-    originCity: form.originCity,
-    destinationCity: form.destinationCity,
+    originCity: canonicalizeLocality(form.originCity) || form.originCity,
+    destinationCity: canonicalizeLocality(form.destinationCity) || form.destinationCity,
     recipient: { name: form.recipientName, phone: form.recipientPhone || '', address: form.recipientAddress || '' },
     packageData: {
       weightKg: Number(form.weightKg || 0),
@@ -222,12 +223,16 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
   }
 
   if (nextStatus === 'incident') {
+    const incidentStage = fresh.currentStatus
+    const incidentCheckpoint = CHECKPOINTS[incidentStage] || fresh.currentLocation || 'Etapa operativa'
     hasIncident = true
     currentLocation = 'Mesa de incidencias'
     updates.incidentReason = incidentReason || notes || 'Incidencia operativa'
     updates.incidentType = incidentType || 'Otro'
+    updates.incidentStage = incidentStage
+    updates.incidentCheckpoint = incidentCheckpoint
     updates.previousOperationalStatus = STATUS_FLOW.includes(fresh.currentStatus) ? fresh.currentStatus : (fresh.previousOperationalStatus || null)
-    await queueAlertIfMissing(batch, firestore, db, fresh, 'incident', 'high', incidentReason || notes || 'Paquete marcado con incidencia', { incidentType: incidentType || 'Otro' })
+    await queueAlertIfMissing(batch, firestore, db, fresh, 'incident', 'high', incidentReason || notes || 'Paquete marcado con incidencia', { incidentType: incidentType || 'Otro', incidentStage, incidentCheckpoint })
   }
 
   if (nextStatus === 'delivered') {
@@ -235,6 +240,9 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     currentLocation = 'Entrega confirmada'
     hasIncident = false
     updates.incidentReason = null
+    updates.incidentType = null
+    updates.incidentStage = null
+    updates.incidentCheckpoint = null
     updates.delayAlert = false
     updates.noScanAlert = false
   }
@@ -262,6 +270,9 @@ export async function changePackageStatus(pkg, nextStatus, { profile, zones = []
     scanPoint: checkpoint,
     title,
     notes: notes || (nextStatus === 'incident' ? updates.incidentReason : `${title} mediante escaneo operativo.`),
+    incidentType: nextStatus === 'incident' ? updates.incidentType : null,
+    incidentStage: nextStatus === 'incident' ? updates.incidentStage : null,
+    incidentCheckpoint: nextStatus === 'incident' ? updates.incidentCheckpoint : null,
     scannedByUid: profile.uid,
     scannedByName: actorName(profile),
     scannedBy: actorName(profile),
@@ -332,6 +343,10 @@ export async function resolveAlert(alert, profile, resolutionNote = '') {
         hasIncident: false,
         delayAlert: false,
         noScanAlert: false,
+        incidentReason: null,
+        incidentType: null,
+        incidentStage: null,
+        incidentCheckpoint: null,
         updatedAt: firestore.serverTimestamp(),
       }))
     }

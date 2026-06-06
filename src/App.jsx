@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import './App.css'
 import Layout from './components/Layout'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -14,6 +15,10 @@ import Settings from './pages/Settings'
 import { canAccessRoute } from './utils/format'
 import { RouterProvider, useLocation, useNavigate } from './utils/router'
 
+function getInitialRoute(profile) {
+  return profile?.role === 'operario' ? '/scan' : '/dashboard'
+}
+
 function AccessDenied({ profile }) {
   return <div className="card"><h2>Acceso denegado</h2><p>Tu rol ({profile?.role}) no tiene permisos para esta pantalla.</p></div>
 }
@@ -21,15 +26,19 @@ function AccessDenied({ profile }) {
 function ProtectedApp() {
   const { isAuthenticated, loading, authError, profile } = useAuth()
   const location = useLocation(); const navigate = useNavigate()
-  if (loading) return <div className="boot">Inicializando Firebase...</div>
-  if (!isAuthenticated) {
-    if (location.pathname !== '/login') queueMicrotask(() => navigate('/login'))
-    return <Login />
-  }
-  if (location.pathname === '/login') queueMicrotask(() => navigate('/dashboard'))
-  const path = location.pathname === '/' || location.pathname === '/app' || location.pathname === '/login' ? '/dashboard' : location.pathname
-  if ((location.pathname === '/' || location.pathname === '/app') && path !== location.pathname) queueMicrotask(() => navigate('/dashboard'))
+  const initialRoute = getInitialRoute(profile)
 
+  useEffect(() => {
+    if (loading) return
+    if (!isAuthenticated && location.pathname !== '/login') navigate('/login')
+    if (isAuthenticated && ['/login', '/', '/app'].includes(location.pathname)) navigate(initialRoute)
+    if (isAuthenticated && profile?.role === 'operario' && location.pathname === '/dashboard') navigate('/scan')
+  }, [loading, isAuthenticated, location.pathname, navigate, initialRoute, profile?.role])
+
+  if (loading) return <div className="boot">Validando sesión operativa...</div>
+  if (!isAuthenticated) return <Login />
+
+  const path = ['/', '/app', '/login'].includes(location.pathname) ? initialRoute : location.pathname
   let page
   if (!canAccessRoute(profile, path)) page = <AccessDenied profile={profile} />
   else if (path === '/dashboard') page = <Dashboard />

@@ -11,6 +11,7 @@ export function DataProvider({ children }) {
   const [branches, setBranches] = useState([])
   const [rules, setRules] = useState([])
   const [users, setUsers] = useState([])
+  const [movements] = useState([])
   const [settings, setSettings] = useState({ defaultSlaHours: 8, scanPoints: ['Recepción', 'Clasificación', 'Dock despacho', 'Entrega'] })
   const [loading, setLoading] = useState(true)
 
@@ -35,7 +36,8 @@ export function DataProvider({ children }) {
     }
   }, [])
 
-  const value = useMemo(() => ({ packages, alerts, zones, branches, rules, users, settings, loading }), [packages, alerts, zones, branches, rules, users, settings, loading])
+  const derivedMovements = useMemo(() => (movements.length ? movements : packages.map((pkg) => ({ packageId: pkg.id, guideNumber: pkg.guideNumber, status: pkg.currentStatus, title: 'Ultimo estado conocido', checkpoint: pkg.currentLocation, zoneCode: pkg.assignedZoneCode, scannedByName: 'Sistema', scannedAt: pkg.lastScanAt || pkg.createdAt, notes: 'Movimiento derivado para reportes MVP.' }))), [movements, packages])
+  const value = useMemo(() => ({ packages, alerts, zones, branches, rules, users, movements: derivedMovements, settings, loading }), [packages, alerts, zones, branches, rules, users, derivedMovements, settings, loading])
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>
 }
 

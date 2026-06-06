@@ -1,62 +1,91 @@
 import { getZoneLabel } from './classificationService'
 import { formatDate, getBundles, getDestination, getVolume, getWeight } from '../utils/format'
 
-function esc(value) { return String(value ?? '').replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)') }
-function safe(value, fallback = '—') { return value === undefined || value === null || value === '' ? fallback : value }
-function pdfText(x, y, size, text, opts = {}) { return `BT /F${opts.bold ? 2 : 1} ${size} Tf ${x} ${y} Td (${esc(text)}) Tj ET\n` }
-function rect(x, y, w, h, color = '0.06 0.15 0.26 rg') { return `${color}\n${x} ${y} ${w} ${h} re f\n` }
-function strokeRect(x, y, w, h, color = '0.06 0.15 0.26 RG') { return `${color}\n${x} ${y} ${w} ${h} re S\n` }
-function hashCells(value) {
-  const text = String(value || 'SIN-CODIGO')
-  let seed = 0
-  for (let i = 0; i < text.length; i += 1) seed = ((seed << 5) - seed + text.charCodeAt(i)) | 0
-  const size = 29
-  return Array.from({ length: size * size }, (_, index) => {
-    const row = Math.floor(index / size); const col = index % size
-    const finder = (r, c) => r >= 0 && r < 7 && c >= 0 && c < 7 && (r === 0 || c === 0 || r === 6 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4))
-    if (finder(row, col) || finder(row, col - (size - 7)) || finder(row - (size - 7), col)) return true
-    return ((Math.abs(seed) + row * 17 + col * 31 + text.charCodeAt((row + col) % text.length)) % 7) < 3
+const JSPDF_CDN = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
+const QRCODE_CDN = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js'
+
+function loadScript(src, globalCheck, errorLabel) {
+  if (globalCheck()) return Promise.resolve(globalCheck())
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`)
+    if (existing) {
+      existing.addEventListener('load', () => resolve(globalCheck()), { once: true })
+      existing.addEventListener('error', () => reject(new Error(errorLabel)), { once: true })
+      return
+    }
+    const script = document.createElement('script')
+    script.src = src
+    script.async = true
+    script.onload = () => globalCheck() ? resolve(globalCheck()) : reject(new Error(errorLabel))
+    script.onerror = () => reject(new Error(errorLabel))
+    document.head.appendChild(script)
   })
-}
-function qrCommands(value, x, y, size) {
-  const cells = hashCells(value); const modules = 29; const cell = size / modules
-  let out = rect(x - 6, y - 6, size + 12, size + 12, '1 1 1 rg') + strokeRect(x - 6, y - 6, size + 12, size + 12)
-  cells.forEach((on, index) => {
-    if (!on) return
-    const row = Math.floor(index / modules); const col = index % modules
-    out += rect(x + col * cell, y + size - (row + 1) * cell, cell + 0.05, cell + 0.05)
-  })
-  return out
-}
-function makePdf(content) {
-  const objects = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 420] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
-  ]
-  let pdf = '%PDF-1.4\n'; const offsets = [0]
-  objects.forEach((object, index) => { offsets.push(pdf.length); pdf += `${index + 1} 0 obj\n${object}\nendobj\n` })
-  const xref = pdf.length
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
-  return pdf
 }
 
-export function generatePackageLabelPdf(packageData, zones = []) {
+function loadJsPdf() {
+  return loadScript(JSPDF_CDN, () => window.jspdf?.jsPDF, 'No se pudo cargar jsPDF para generar la etiqueta.')
+}
+
+function loadQRCode() {
+  return loadScript(QRCODE_CDN, () => window.QRCode, 'No se pudo cargar qrcode para generar la etiqueta.')
+}
+
+export function sanitizePdfText(value, fallback = '-') {
+  const text = value === undefined || value === null || value === '' ? fallback : String(value)
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function safe(value, fallback = '-') {
+  return sanitizePdfText(value, fallback)
+}
+
+export async function generatePackageLabelPdf(packageData, zones = []) {
+  const [jsPDF, QRCode] = await Promise.all([loadJsPdf(), loadQRCode()])
   const code = packageData?.qrPayload || packageData?.barcodeValue || packageData?.guideNumber || 'SIN-CODIGO'
-  let content = ''
-  content += rect(0, 360, 595, 60)
-  content += pdfText(30, 390, 20, 'ExpressoCargo Logistics MVP', { bold: true })
-  content += pdfText(410, 390, 13, 'Etiqueta operativa', { bold: true })
-  content += strokeRect(24, 24, 547, 312)
-  content += qrCommands(code, 42, 150, 150)
-  content += pdfText(40, 122, 10, 'QR / código operativo', { bold: true })
-  content += pdfText(40, 104, 11, code)
-  content += pdfText(220, 300, 12, 'Guía', { bold: true })
-  content += pdfText(220, 268, 32, safe(packageData?.guideNumber), { bold: true })
-  content += pdfText(220, 238, 12, `Código visible: ${safe(packageData?.barcodeValue || code)}`)
+  const qrDataUrl = await QRCode.toDataURL(String(code), { errorCorrectionLevel: 'M', margin: 1, width: 520, color: { dark: '#0f172a', light: '#ffffff' } })
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a6', compress: true })
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+
+  doc.setFillColor(15, 39, 66)
+  doc.rect(0, 0, pageWidth, 20, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(15)
+  doc.text('ExpressoCargo Logistics MVP', 8, 12.8)
+  doc.setFontSize(9)
+  doc.text('Etiqueta operativa', pageWidth - 8, 12.5, { align: 'right' })
+
+  doc.setDrawColor(203, 213, 225)
+  doc.setLineWidth(0.4)
+  doc.roundedRect(6, 25, pageWidth - 12, pageHeight - 31, 3, 3)
+
+  doc.addImage(qrDataUrl, 'PNG', 12, 32, 48, 48)
+  doc.setTextColor(15, 23, 42)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7.5)
+  doc.text('Codigo QR operativo', 36, 85, { align: 'center' })
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7)
+  doc.text(safe(code), 36, 90, { align: 'center', maxWidth: 50 })
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  doc.text('Guia', 68, 36)
+  doc.setFontSize(21)
+  doc.text(safe(packageData?.guideNumber), 68, 47, { maxWidth: 70 })
+  doc.setFontSize(8)
+  doc.setTextColor(71, 85, 105)
+  doc.text(`Codigo visible: ${safe(packageData?.barcodeValue || code)}`, 68, 55, { maxWidth: 72 })
+
   const rows = [
     ['Destino/localidad', getDestination(packageData)],
     ['Zona asignada', `${getZoneLabel(packageData?.assignedZoneId || packageData?.assignedZoneCode, zones)} (${safe(packageData?.assignedZoneCode)})`],
@@ -64,18 +93,26 @@ export function generatePackageLabelPdf(packageData, zones = []) {
     ['Bultos', getBundles(packageData)],
     ['Peso', `${getWeight(packageData)} kg`],
     ['Volumen', `${getVolume(packageData)} m3`],
-    ['Fecha de creación', formatDate(packageData?.createdAt)],
+    ['Fecha de creacion', formatDate(packageData?.createdAt)],
   ]
-  rows.forEach(([label, value], index) => {
-    const y = 205 - index * 24
-    content += pdfText(220, y, 10, label, { bold: true })
-    content += pdfText(340, y, 10, String(value))
+
+  let y = 64
+  rows.forEach(([label, value]) => {
+    doc.setTextColor(100, 116, 139)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7.5)
+    doc.text(safe(label), 68, y)
+    doc.setTextColor(15, 23, 42)
+    doc.setFont('helvetica', 'normal')
+    doc.text(safe(value), 101, y, { maxWidth: 40 })
+    y += 6.4
   })
-  const blob = new Blob([makePdf(content)], { type: 'application/pdf' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `etiqueta-${packageData?.guideNumber || code}.pdf`
-  link.click()
-  URL.revokeObjectURL(url)
+
+  doc.setFillColor(248, 250, 252)
+  doc.roundedRect(8, pageHeight - 10, pageWidth - 16, 5, 1, 1, 'F')
+  doc.setTextColor(71, 85, 105)
+  doc.setFontSize(6.5)
+  doc.text('Operacion Logistica - Creacion de etiqueta en una pagina A6 horizontal', 10, pageHeight - 6.5)
+
+  doc.save(`etiqueta-${safe(packageData?.guideNumber || code, 'paquete')}.pdf`)
 }
