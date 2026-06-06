@@ -21,10 +21,10 @@ export default function AlertTable({ alerts = [], compact = false }) {
           <td><span className={alert.status === 'resolved' ? 'pill' : 'pill pill-hot'}>{alert.status === 'resolved' ? 'Resuelta' : 'Abierta'}</span></td>
           <td><span className={`severity severity-${alert.severity || 'medium'}`}>{alert.severity || 'medium'}</span></td>
           <td>{alert.type}</td><td>{alert.guideNumber || '—'}</td><td>{alert.message}</td>{!compact && <td>{formatDate(alert.createdAt)}</td>}{!compact && <td>{alert.resolvedAt ? `${formatDate(alert.resolvedAt)} · ${alert.resolvedByName || 'Usuario operativo'}` : '—'}</td>}
-          <td>{alert.status !== 'resolved' && can(profile, 'alerts.resolve', ['supervisor']) ? <button className="btn btn-ghost" onClick={() => { setSelected(alert); setNote(''); setError('') }}>Resolver</button> : null}</td>
+          <td>{alert.status !== 'resolved' && can(profile, 'alerts.resolve', ['supervisor']) ? <button className="btn btn-ghost" onClick={() => { setSelected(alert); setNote(''); setError('') }}>Resolver y continuar</button> : null}</td>
         </tr>)}
       </tbody>
     </table>
-    <ActionModal open={Boolean(selected)} title="Resolver alerta" description="Confirmá la resolución de la alerta operativa. La nota es opcional." fieldLabel="Nota de resolución (opcional)" value={note} onChange={setNote} loading={busy} error={error} onCancel={() => !busy && setSelected(null)} onConfirm={confirmResolve} />
+    <ActionModal open={Boolean(selected)} title="Resolver y continuar" description="Confirmá la resolución. Si no quedan alertas abiertas, se limpiará la incidencia activa del paquete y volverá al último estado operativo válido." fieldLabel="Nota de resolución (opcional)" value={note} onChange={setNote} loading={busy} error={error} onCancel={() => !busy && setSelected(null)} onConfirm={confirmResolve} />
   </div>
 }
