@@ -1,46 +1,9 @@
+import ExcelJS from 'exceljs'
+import { saveAs } from 'file-saver'
 import { formatDate, getBundles, getDestination, getProductType, getRecipientName, getVolume, getWeight, hoursSince, toDate } from './format'
 
 export const EXCEL_EXPORT_AVAILABLE = true
 export const EXCEL_EXPORT_UNAVAILABLE_REASON = ''
-
-const EXCELJS_CDN = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'
-const FILE_SAVER_CDN = 'https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js'
-
-function loadScript(src, globalCheck) {
-  if (globalCheck()) return Promise.resolve(globalCheck())
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`)
-    if (existing) {
-      existing.addEventListener('load', () => resolve(globalCheck()), { once: true })
-      existing.addEventListener('error', () => reject(new Error(`No se pudo cargar ${src}`)), { once: true })
-      return
-    }
-    const script = document.createElement('script')
-    script.src = src
-    script.async = true
-    script.onload = () => globalCheck() ? resolve(globalCheck()) : reject(new Error(`La libreria no quedo disponible: ${src}`))
-    script.onerror = () => reject(new Error(`No se pudo cargar ${src}`))
-    document.head.appendChild(script)
-  })
-}
-
-async function loadExcelJS() {
-  return loadScript(EXCELJS_CDN, () => window.ExcelJS)
-}
-
-async function saveBlob(blob, filename) {
-  const fileSaver = await loadScript(FILE_SAVER_CDN, () => window.saveAs).catch(() => null)
-  if (fileSaver) {
-    fileSaver(blob, filename)
-    return
-  }
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
 
 const EMPTY = '—'
 
@@ -197,7 +160,6 @@ function addObjectSheet(workbook, name, objects) {
 
 export async function exportOperationalExcel({ packages = [], alerts = [], zones = [], movements = [] }) {
   const data = buildOperationalWorkbookData({ packages, alerts, zones, movements })
-  const ExcelJS = await loadExcelJS()
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'ExpressoCargo Logistics MVP'
   workbook.created = new Date()
@@ -209,5 +171,5 @@ export async function exportOperationalExcel({ packages = [], alerts = [], zones
   addObjectSheet(workbook, 'Movimientos', data.movimientos)
   const buffer = await workbook.xlsx.writeBuffer()
   const today = new Date().toISOString().slice(0, 10)
-  await saveBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `expresocargo-operativo-${today}.xlsx`)
+  saveAs(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `expresocargo-operativo-${today}.xlsx`)
 }
