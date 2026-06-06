@@ -103,17 +103,17 @@ export async function generatePackageLabelPdf(packageData, zones = []) {
     ['Fecha de creacion', formatDate(packageData?.createdAt)],
   ]
 
-  let y = 64
+  let y = 61
   rows.forEach(([label, value]) => {
     labelValue(doc, label, value, 68, y, 101)
-    y += 6.4
+    y += 5.3
   })
 
   doc.setFillColor(248, 250, 252)
-  doc.roundedRect(8, pageHeight - 10, pageWidth - 16, 5, 1, 1, 'F')
+  doc.roundedRect(8, pageHeight - 7, pageWidth - 16, 4, 1, 1, 'F')
   doc.setTextColor(71, 85, 105)
   doc.setFontSize(6.5)
-  text(doc, 'Operacion Logistica - Creacion de etiqueta en una pagina A6 horizontal', 10, pageHeight - 6.5)
+  text(doc, 'Operacion Logistica - Creacion de etiqueta en una pagina A6 horizontal', 10, pageHeight - 4.5)
 
   doc.save(`etiqueta-${safe(packageData?.guideNumber || qrValue, 'paquete')}.pdf`)
 }
