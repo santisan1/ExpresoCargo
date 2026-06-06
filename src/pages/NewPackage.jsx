@@ -38,6 +38,8 @@ export default function NewPackage() {
     if (!isProcessableLocality(form.destinationCity)) return 'El destino debe ser una localidad canónica procesable o Localidad Desconocida.'
     return ''
   }
+  const downloadCreatedLabel = () => generatePackageLabelPdf(createdPkg, zones).catch((err) => console.error(err.message || err))
+
   async function submit(event) {
     event.preventDefault()
     if (saving) return
@@ -68,6 +70,6 @@ export default function NewPackage() {
       {error && <div className="error-box form-wide">{error}</div>}
       <button className="btn btn-primary" disabled={saving}>{saving ? 'Creando...' : 'Crear paquete'}</button>
     </form>
-    {createdPkg && <article className="card label-confirmation"><h3>Paquete creado correctamente</h3><p>Se creó el documento, el primer movimiento y el auditLog. Podés descargar la etiqueta PDF o abrir el detalle.</p><div className="actions"><button className="btn btn-primary" onClick={() => generatePackageLabelPdf(createdPkg, zones)}>Descargar etiqueta PDF</button><button className="btn" onClick={() => navigate(`/packages/${createdPkg.id}`)}>Ir al detalle</button></div></article>}
+    {createdPkg && <article className="card label-confirmation"><h3>Paquete creado correctamente</h3><p>Se creó el documento, el primer movimiento y el auditLog. Podés descargar la etiqueta PDF o abrir el detalle.</p><div className="actions"><button className="btn btn-primary" onClick={downloadCreatedLabel}>Descargar etiqueta PDF</button><button className="btn" onClick={() => navigate(`/packages/${createdPkg.id}`)}>Ir al detalle</button></div></article>}
   </div>
 }
