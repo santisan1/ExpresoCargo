@@ -3,6 +3,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { subscribeCollection } from '../services/firestoreService'
 
 const DataContext = createContext(null)
+const COLLECTION_KEYS = ['packages', 'alerts', 'zones', 'branches', 'rules', 'users', 'settings']
+const DEFAULT_SETTINGS = { defaultSlaHours: 8, scanPoints: ['Recepción', 'Clasificación', 'Dock despacho', 'Entrega'] }
 
 export function DataProvider({ children }) {
   const [packages, setPackages] = useState([])
@@ -12,32 +14,76 @@ export function DataProvider({ children }) {
   const [rules, setRules] = useState([])
   const [users, setUsers] = useState([])
   const [movements] = useState([])
-  const [settings, setSettings] = useState({ defaultSlaHours: 8, scanPoints: ['Recepción', 'Clasificación', 'Dock despacho', 'Entrega'] })
-  const [loading, setLoading] = useState(true)
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS)
+  const [pendingCollections, setPendingCollections] = useState(() => new Set(COLLECTION_KEYS))
 
   useEffect(() => {
-    let mounted = true
+    let cancelled = false
     const cleanups = []
-    Promise.all([
-      subscribeCollection('packages', setPackages),
-      subscribeCollection('alerts', setAlerts),
-      subscribeCollection('zones', setZones),
-      subscribeCollection('branches', setBranches),
-      subscribeCollection('classificationRules', setRules, 'priority'),
-      subscribeCollection('users', setUsers),
-      subscribeCollection('settings', (items) => setSettings((prev) => ({ ...prev, ...(items.find((item) => item.id === 'main') || items[0] || {}) }))),
-    ]).then((unsubs) => {
-      cleanups.push(...unsubs)
-      if (mounted) setLoading(false)
-    }).catch(() => mounted && setLoading(false))
+
+    const markLoaded = (key) => {
+      if (cancelled) return
+      setPendingCollections((current) => {
+        if (!current.has(key)) return current
+        const next = new Set(current)
+        next.delete(key)
+        return next
+      })
+    }
+
+    const subscribe = async (key, path, setter, orderField = null) => {
+      try {
+        const unsubscribe = await subscribeCollection(path, (items) => {
+          setter(items)
+          markLoaded(key)
+        }, orderField)
+        if (cancelled) unsubscribe?.()
+        else cleanups.push(unsubscribe)
+      } catch {
+        markLoaded(key)
+      }
+    }
+
+    subscribe('packages', 'packages', setPackages)
+    subscribe('alerts', 'alerts', setAlerts)
+    subscribe('zones', 'zones', setZones)
+    subscribe('branches', 'branches', setBranches)
+    subscribe('rules', 'classificationRules', setRules, 'priority')
+    subscribe('users', 'users', setUsers)
+    subscribe('settings', 'settings', (items) => setSettings((prev) => ({ ...prev, ...(items.find((item) => item.id === 'main') || items[0] || {}) })))
+
     return () => {
-      mounted = false
+      cancelled = true
       cleanups.forEach((unsubscribe) => unsubscribe?.())
     }
   }, [])
 
-  const derivedMovements = useMemo(() => (movements.length ? movements : packages.map((pkg) => ({ packageId: pkg.id, guideNumber: pkg.guideNumber, status: pkg.currentStatus, title: 'Ultimo estado conocido', checkpoint: pkg.currentLocation, zoneCode: pkg.assignedZoneCode, scannedByName: 'Sistema', scannedAt: pkg.lastScanAt || pkg.createdAt, notes: 'Movimiento derivado para reportes MVP.' }))), [movements, packages])
-  const value = useMemo(() => ({ packages, alerts, zones, branches, rules, users, movements: derivedMovements, settings, loading }), [packages, alerts, zones, branches, rules, users, derivedMovements, settings, loading])
+  const derivedMovements = useMemo(() => (movements.length ? movements : packages.map((pkg) => ({
+    packageId: pkg.id,
+    guideNumber: pkg.guideNumber,
+    status: pkg.currentStatus,
+    title: 'Ultimo estado conocido',
+    checkpoint: pkg.currentLocation,
+    zoneCode: pkg.assignedZoneCode,
+    scannedByName: 'Sistema',
+    scannedAt: pkg.lastScanAt || pkg.createdAt,
+    notes: 'Movimiento derivado para reportes MVP.',
+  }))), [movements, packages])
+
+  const dataLoading = pendingCollections.size > 0
+  const value = useMemo(() => ({
+    packages,
+    alerts,
+    zones,
+    branches,
+    rules,
+    users,
+    movements: derivedMovements,
+    settings,
+    dataLoading,
+    loading: dataLoading,
+  }), [packages, alerts, zones, branches, rules, users, derivedMovements, settings, dataLoading])
+
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>
 }
 
