@@ -23,34 +23,46 @@ function AccessDenied({ profile }) {
   return <div className="card"><h2>Acceso denegado</h2><p>Tu rol ({profile?.role}) no tiene permisos para esta pantalla.</p></div>
 }
 
+function CurrentPage({ profile }) {
+  const location = useLocation()
+  const initialRoute = getInitialRoute(profile)
+  const path = ['/', '/app', '/login'].includes(location.pathname) ? initialRoute : location.pathname
+
+  if (!canAccessRoute(profile, path)) return <AccessDenied profile={profile} />
+  if (path === '/dashboard') return <Dashboard />
+  if (path === '/scan') return <Scan />
+  if (path === '/packages') return <Packages />
+  if (path === '/packages/new') return <NewPackage />
+  if (path.startsWith('/packages/')) return <PackageDetail id={path.split('/')[2]} />
+  if (path === '/alerts') return <Alerts />
+  if (path === '/reports') return <Reports />
+  if (path === '/settings') return <Settings />
+  return <AccessDenied profile={profile} />
+}
+
+function AuthenticatedApp() {
+  const { authError, profile } = useAuth()
+
+  return <DataProvider><Layout>{authError && <div className="error-box">{authError}</div>}<CurrentPage profile={profile} /></Layout></DataProvider>
+}
+
 function ProtectedApp() {
-  const { isAuthenticated, loading, authError, profile } = useAuth()
-  const location = useLocation(); const navigate = useNavigate()
+  const { authUser, isAuthenticated, authInitializing, profileLoading, profile } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const initialRoute = getInitialRoute(profile)
 
   useEffect(() => {
-    if (loading) return
+    if (authInitializing || profileLoading) return
     if (!isAuthenticated && location.pathname !== '/login') navigate('/login')
     if (isAuthenticated && ['/login', '/', '/app'].includes(location.pathname)) navigate(initialRoute)
     if (isAuthenticated && profile?.role === 'operario' && location.pathname === '/dashboard') navigate('/scan')
-  }, [loading, isAuthenticated, location.pathname, navigate, initialRoute, profile?.role])
+  }, [authInitializing, profileLoading, isAuthenticated, location.pathname, navigate, initialRoute, profile?.role])
 
-  if (loading) return <div className="boot">Validando sesión operativa...</div>
+  if (authInitializing) return <div className="boot">Validando sesión operativa...</div>
+  if (authUser && profileLoading && !profile) return <div className="boot">Cargando perfil operativo...</div>
   if (!isAuthenticated) return <Login />
-
-  const path = ['/', '/app', '/login'].includes(location.pathname) ? initialRoute : location.pathname
-  let page
-  if (!canAccessRoute(profile, path)) page = <AccessDenied profile={profile} />
-  else if (path === '/dashboard') page = <Dashboard />
-  else if (path === '/scan') page = <Scan />
-  else if (path === '/packages') page = <Packages />
-  else if (path === '/packages/new') page = <NewPackage />
-  else if (path.startsWith('/packages/')) page = <PackageDetail id={path.split('/')[2]} />
-  else if (path === '/alerts') page = <Alerts />
-  else if (path === '/reports') page = <Reports />
-  else if (path === '/settings') page = <Settings />
-  else page = <AccessDenied profile={profile} />
-  return <DataProvider><Layout>{authError && <div className="error-box">{authError}</div>}{page}</Layout></DataProvider>
+  return <AuthenticatedApp />
 }
 
 export default function App() {

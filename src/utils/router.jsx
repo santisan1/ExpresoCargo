@@ -20,7 +20,14 @@ export function RouterProvider({ children }) {
 export function useLocation() { return useContext(RouterContext).location }
 export function useNavigate() { return useContext(RouterContext).navigate }
 
-export function Link({ to, children, className = '', ...props }) {
+export function Link({ to, children, className = '', onClick, target, ...props }) {
   const navigate = useNavigate()
-  return <a href={to} className={className} onClick={(event) => { event.preventDefault(); navigate(to) }} {...props}>{children}</a>
+  const handleClick = (event) => {
+    onClick?.(event)
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey || target) return
+    event.preventDefault()
+    navigate(to)
+  }
+
+  return <a href={to} className={className} target={target} onClick={handleClick} {...props}>{children}</a>
 }
